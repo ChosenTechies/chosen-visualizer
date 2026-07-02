@@ -1,6 +1,6 @@
 use crate::{
     audio::{AudioEngine, AudioFrame},
-    settings::{ColorPreset, Settings, TaskbarEdge, VisualizerMode, settings_path},
+    settings::{ColorPreset, Settings, TaskbarEdge, VisualizerMode},
     tray::{self, TrayCommand, TrayController},
     updater::{self, APP_VERSION_LABEL, UpdateCheckResult, UpdateInfo},
     visualizer::VisualizerState,
@@ -61,7 +61,10 @@ impl ChosenVisualizerApp {
             update_rx: Some(updater::start_update_check()),
             update_info: None,
             show_update_popup: false,
-            update_status: None,
+            update_status: Some(format!(
+                "Checking GitHub releases in {}...",
+                updater::repository()
+            )),
         }
     }
 
@@ -71,17 +74,31 @@ impl ChosenVisualizerApp {
             .resize_with(count, VisualizerState::default);
     }
 
+    fn begin_update_check(&mut self) {
+        if self.update_rx.is_some() {
+            return;
+        }
+
+        self.show_update_popup = false;
+        self.update_status = Some(format!(
+            "Checking GitHub releases in {}...",
+            updater::repository()
+        ));
+        self.update_rx = Some(updater::start_update_check());
+    }
+
     fn poll_update_check(&mut self) {
         if let Some(rx) = &self.update_rx {
             if let Ok(result) = rx.try_recv() {
                 self.update_rx = None;
                 match result {
                     UpdateCheckResult::Available(info) => {
+                        self.update_status = Some(format!("Update available: {}", info.tag));
                         self.update_info = Some(info);
                         self.show_update_popup = true;
                     }
                     UpdateCheckResult::UpToDate => {
-                        self.update_status = Some("Chosen Visualizer is up to date.".to_owned());
+                        self.update_status = Some("Running the latest GitHub release.".to_owned());
                     }
                     UpdateCheckResult::Failed(error) => {
                         self.update_status = Some(format!("Update check failed: {error}"));
@@ -155,40 +172,71 @@ impl ChosenVisualizerApp {
 
         egui::TopBottomPanel::top("top_bar")
             .exact_height(if self.settings.compact_controls {
-                38.0
+                42.0
             } else {
-                46.0
+                52.0
             })
             .frame(
                 egui::Frame::none()
-                    .fill(Color32::from_rgb(18, 20, 23))
+                    .fill(Color32::from_rgb(15, 17, 20))
                     .inner_margin(egui::Margin::symmetric(14.0, 7.0)),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading(
-                        RichText::new(self.title)
-                            .size(16.0)
-                            .color(Color32::from_rgb(232, 233, 234)),
-                    );
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new(self.title)
+                                .strong()
+                                .size(15.5)
+                                .color(Color32::from_rgb(238, 240, 243)),
+                        );
+                        ui.label(
+                            RichText::new(APP_VERSION_LABEL)
+                                .size(11.0)
+                                .color(Color32::from_rgb(141, 150, 162)),
+                        );
+                    });
                     ui.separator();
-                    if ui.button("Open settings window").clicked() {
+                    if ui
+                        .button("Settings")
+                        .on_hover_text("Open settings window")
+                        .clicked()
+                    {
                         self.settings.show_settings = true;
                         self.mark_changed();
                     }
-                    if ui.button("Visualizer only").clicked() {
+                    if ui
+                        .button("Widget")
+                        .on_hover_text("Switch to visualizer-only desktop widget mode")
+                        .clicked()
+                    {
                         self.settings.show_top_bar = false;
                         self.settings.frameless = true;
                         self.settings.desktop_widget = true;
                         self.settings.visualizer_only_widget = true;
                         self.mark_changed();
                     }
-                    if ui.button("Hide to tray").clicked() {
+                    if ui.button("Hide").on_hover_text("Hide to tray").clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
                     }
                     if ui.button("Reset").clicked() {
                         self.settings = Settings::default();
                         self.mark_changed();
+                    }
+                    if ui.button("Check updates").clicked() {
+                        self.begin_update_check();
+                    }
+                    if let Some(info) = self.update_info.clone() {
+                        if ui
+                            .add_enabled(info.asset.is_some(), egui::Button::new("Install update"))
+                            .on_hover_text("Download the installer attached to the GitHub release")
+                            .clicked()
+                        {
+                            match updater::launch_update_ui(&info) {
+                                Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                                Err(error) => self.update_status = Some(error),
+                            }
+                        }
                     }
                     if ui.button("About").clicked() {
                         self.settings.show_settings = true;
@@ -196,11 +244,16 @@ impl ChosenVisualizerApp {
                         self.mark_changed();
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(settings_path().display().to_string())
-                                .size(11.0)
-                                .color(Color32::from_rgb(130, 135, 142)),
-                        );
+                        if self.update_rx.is_some() {
+                            ui.spinner();
+                        }
+                        if let Some(status) = &self.update_status {
+                            ui.label(
+                                RichText::new(status)
+                                    .size(11.0)
+                                    .color(Color32::from_rgb(141, 150, 162)),
+                            );
+                        }
                     });
                 });
             });
@@ -555,20 +608,46 @@ impl ChosenVisualizerApp {
 
     fn settings_top_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("settings_window_top_bar")
-            .exact_height(44.0)
+            .exact_height(50.0)
             .frame(
                 egui::Frame::none()
-                    .fill(Color32::from_rgb(18, 20, 23))
+                    .fill(Color32::from_rgb(15, 17, 20))
                     .inner_margin(egui::Margin::symmetric(14.0, 7.0)),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.heading(
-                        RichText::new("Chosen Visualizer Settings")
-                            .size(15.0)
-                            .color(Color32::from_rgb(232, 233, 234)),
-                    );
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new("Settings")
+                                .strong()
+                                .size(15.5)
+                                .color(Color32::from_rgb(238, 240, 243)),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{} - {}",
+                                APP_VERSION_LABEL,
+                                updater::repository()
+                            ))
+                            .size(11.0)
+                            .color(Color32::from_rgb(141, 150, 162)),
+                        );
+                    });
                     ui.separator();
+                    if ui.button("Check updates").clicked() {
+                        self.begin_update_check();
+                    }
+                    if let Some(info) = self.update_info.clone() {
+                        if ui
+                            .add_enabled(info.asset.is_some(), egui::Button::new("Install update"))
+                            .clicked()
+                        {
+                            match updater::launch_update_ui(&info) {
+                                Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                                Err(error) => self.update_status = Some(error),
+                            }
+                        }
+                    }
                     if ui.button("About").clicked() {
                         self.show_about = true;
                     }
@@ -577,11 +656,16 @@ impl ChosenVisualizerApp {
                         self.mark_changed();
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(settings_path().display().to_string())
-                                .size(11.0)
-                                .color(Color32::from_rgb(130, 135, 142)),
-                        );
+                        if self.update_rx.is_some() {
+                            ui.spinner();
+                        }
+                        if let Some(status) = &self.update_status {
+                            ui.label(
+                                RichText::new(status)
+                                    .size(11.0)
+                                    .color(Color32::from_rgb(141, 150, 162)),
+                            );
+                        }
                     });
                 });
             });
@@ -779,9 +863,9 @@ impl ChosenVisualizerApp {
                             about_list(
                                 ui,
                                 &[
-                                    "Added GitHub release update detection with a dedicated updater window.",
+                                    "Updater now checks ChosenTechies GitHub releases and validates installer assets.",
                                     "Added support for multiple visualizers on screen at the same time.",
-                                    "Updated version to 1.0.2 Early access.",
+                                    "Version labels now come from Cargo package metadata.",
                                 ],
                             );
                             ui.add_space(8.0);
@@ -898,41 +982,85 @@ impl ChosenVisualizerApp {
         };
 
         let mut open = self.show_update_popup;
-        egui::Window::new("Chosen Visualizer update available")
+        egui::Window::new("Update available")
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
-            .default_width(520.0)
+            .default_width(560.0)
             .show(ctx, |ui| {
-                ui.heading(format!("{} is available", info.version));
-                ui.label(
-                    RichText::new(format!("Installed: {APP_VERSION_LABEL}"))
-                        .color(Color32::from_rgb(170, 174, 178)),
-                );
-                ui.add_space(8.0);
-                ui.label("A newer early-access release was detected on GitHub.");
-                if !info.notes.trim().is_empty() {
-                    ui.separator();
-                    egui::ScrollArea::vertical()
-                        .max_height(160.0)
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new(if info.prerelease { "GitHub pre-release" } else { "GitHub release" })
+                            .size(12.0)
+                            .color(Color32::from_rgb(141, 150, 162)),
+                    );
+                    ui.heading(
+                        RichText::new(&info.version)
+                            .size(22.0)
+                            .color(Color32::from_rgb(238, 240, 243)),
+                    );
+                    ui.label(
+                        RichText::new(format!("Installed: {APP_VERSION_LABEL}  |  Available tag: {}", info.tag))
+                            .color(Color32::from_rgb(170, 174, 178)),
+                    );
+                    ui.add_space(10.0);
+
+                    egui::Frame::none()
+                        .fill(Color32::from_rgb(24, 27, 31))
+                        .stroke(Stroke::new(1.0, Color32::from_rgb(46, 52, 60)))
+                        .inner_margin(egui::Margin::symmetric(14.0, 12.0))
                         .show(ui, |ui| {
-                            ui.label(info.notes.trim());
+                            if let Some(asset) = &info.asset {
+                                ui.label(
+                                    RichText::new("Ready to install")
+                                        .strong()
+                                        .color(Color32::from_rgb(186, 220, 193)),
+                                );
+                                ui.label(
+                                    RichText::new(format!("Installer asset: {}", asset.name))
+                                        .color(Color32::from_rgb(178, 185, 194)),
+                                );
+                            } else {
+                                ui.label(
+                                    RichText::new("Manual download required")
+                                        .strong()
+                                        .color(Color32::from_rgb(220, 185, 145)),
+                                );
+                                ui.label(
+                                    RichText::new("This release has no .exe or .msi installer asset attached.")
+                                        .color(Color32::from_rgb(178, 185, 194)),
+                                );
+                            }
                         });
-                }
-                ui.separator();
-                ui.horizontal(|ui| {
-                    if ui.button("Update now").clicked() {
-                        match updater::launch_update_ui(&info) {
-                            Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-                            Err(error) => self.update_status = Some(error),
+
+                    if !info.notes.trim().is_empty() {
+                        ui.add_space(8.0);
+                        egui::ScrollArea::vertical()
+                            .max_height(170.0)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.label(info.notes.trim());
+                            });
+                    }
+
+                    ui.separator();
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Later").clicked() {
+                            self.show_update_popup = false;
                         }
-                    }
-                    if ui.button("Open GitHub release").clicked() {
-                        updater::open_url(&info.page_url);
-                    }
-                    if ui.button("Later").clicked() {
-                        self.show_update_popup = false;
-                    }
+                        if ui.button("Open GitHub release").clicked() {
+                            updater::open_url(&info.page_url);
+                        }
+                        if ui
+                            .add_enabled(info.asset.is_some(), egui::Button::new("Install update"))
+                            .clicked()
+                        {
+                            match updater::launch_update_ui(&info) {
+                                Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                                Err(error) => self.update_status = Some(error),
+                            }
+                        }
+                    });
                 });
             });
         self.show_update_popup = open && self.show_update_popup;

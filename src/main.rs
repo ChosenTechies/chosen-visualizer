@@ -18,7 +18,10 @@ fn main() -> eframe::Result<()> {
     if args.next().as_deref() == Some("--update-ui") {
         let download_url = args.next().unwrap_or_default();
         let release_url = args.next().unwrap_or_else(|| download_url.clone());
-        return run_updater(download_url, release_url);
+        let asset_name = args
+            .next()
+            .unwrap_or_else(|| "chosen-visualizer-update.exe".to_owned());
+        return run_updater(download_url, release_url, asset_name);
     }
 
     let app_icon =
@@ -46,7 +49,11 @@ fn main() -> eframe::Result<()> {
     )
 }
 
-fn run_updater(download_url: String, release_url: String) -> eframe::Result<()> {
+fn run_updater(
+    download_url: String,
+    release_url: String,
+    asset_name: String,
+) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("Chosen Visualizer Updater")
@@ -58,6 +65,12 @@ fn run_updater(download_url: String, release_url: String) -> eframe::Result<()> 
     eframe::run_native(
         "Chosen Visualizer Updater",
         options,
-        Box::new(|_cc| Ok(Box::new(UpdatingApp::new(download_url, release_url)))),
+        Box::new(|_cc| {
+            Ok(Box::new(UpdatingApp::new(
+                download_url,
+                release_url,
+                asset_name,
+            )))
+        }),
     )
 }
