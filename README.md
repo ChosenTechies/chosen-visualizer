@@ -7,7 +7,9 @@ Chosen Visualizer is a native Rust desktop audio visualizer for Windows. It capt
 - Reacts to system/app audio through Windows WASAPI loopback.
 - Preview signal fallback if loopback capture is unavailable.
 - Visualizer modes: bars, mirrored bars, waveform, radial, and particles.
+- Multiple visualizers can be shown on screen at the same time.
 - Settings for bands, sensitivity, smoothing, noise gate, bass boost, falloff, line width, opacity, and FPS.
+- Early-access update checks detect newer GitHub releases and open a dedicated updater window.
 - Muted color presets plus custom color selection.
 - Desktop widget mode: place the visualizer anywhere with X/Y/width/height controls, hide the app controls, and let it keep running as a desktop overlay.
 - `F10` restores controls if the visualizer is running alone.

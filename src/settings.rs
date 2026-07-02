@@ -164,6 +164,8 @@ pub struct Settings {
     pub taskbar_edge: TaskbarEdge,
     pub strip_thickness: f32,
     pub target_fps: u32,
+    #[serde(default = "default_visualizer_count")]
+    pub visualizer_count: usize,
 }
 
 impl Default for Settings {
@@ -206,6 +208,7 @@ impl Default for Settings {
             taskbar_edge: TaskbarEdge::Bottom,
             strip_thickness: 96.0,
             target_fps: 60,
+            visualizer_count: 1,
         }
     }
 }
@@ -251,6 +254,7 @@ impl Settings {
         self.desktop_height = self.desktop_height.clamp(80, 2160);
         self.strip_thickness = self.strip_thickness.clamp(48.0, 260.0);
         self.target_fps = self.target_fps.clamp(30, 144);
+        self.visualizer_count = self.visualizer_count.clamp(1, 6);
         self.taskbar_strip = false;
 
         if self.desktop_widget {
@@ -279,6 +283,10 @@ impl Settings {
     pub fn accent_colors(&self) -> (Color32, Color32) {
         self.color_preset.colors(self.custom_color)
     }
+}
+
+fn default_visualizer_count() -> usize {
+    1
 }
 
 pub fn settings_path() -> PathBuf {

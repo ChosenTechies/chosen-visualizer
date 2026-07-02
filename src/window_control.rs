@@ -188,7 +188,13 @@ mod windows_impl {
             )
         } else {
             // Desktop-only without widget placement: only adjust the z-order.
-            (0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED)
+            (
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED,
+            )
         };
         unsafe {
             SetWindowPos(

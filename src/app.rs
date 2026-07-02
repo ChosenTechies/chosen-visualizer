@@ -2,6 +2,7 @@ use crate::{
     audio::{AudioEngine, AudioFrame},
     settings::{ColorPreset, Settings, TaskbarEdge, VisualizerMode, settings_path},
     tray::{self, TrayCommand, TrayController},
+    updater::{self, APP_VERSION_LABEL, UpdateCheckResult, UpdateInfo},
     visualizer::VisualizerState,
     window_control::{self, DisplayArea, NativeWindowHandle, WindowFlags},
 };
@@ -11,12 +12,15 @@ use eframe::{
 };
 #[cfg(windows)]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use std::time::{Duration, Instant};
+use std::{
+    sync::mpsc::Receiver,
+    time::{Duration, Instant},
+};
 
 pub struct ChosenVisualizerApp {
     title: &'static str,
     audio: AudioEngine,
-    visualizer: VisualizerState,
+    visualizers: Vec<VisualizerState>,
     settings_visualizer: VisualizerState,
     settings: Settings,
     native_window: Option<NativeWindowHandle>,
@@ -26,6 +30,10 @@ pub struct ChosenVisualizerApp {
     last_save_at: Instant,
     pending_save: bool,
     show_about: bool,
+    update_rx: Option<Receiver<UpdateCheckResult>>,
+    update_info: Option<UpdateInfo>,
+    show_update_popup: bool,
+    update_status: Option<String>,
 }
 
 impl ChosenVisualizerApp {
@@ -40,7 +48,7 @@ impl ChosenVisualizerApp {
         Self {
             title,
             audio: AudioEngine::start(),
-            visualizer: VisualizerState::default(),
+            visualizers: vec![VisualizerState::default()],
             settings_visualizer: VisualizerState::default(),
             native_window,
             tray,
@@ -50,6 +58,36 @@ impl ChosenVisualizerApp {
             last_save_at: Instant::now(),
             pending_save: false,
             show_about: false,
+            update_rx: Some(updater::start_update_check()),
+            update_info: None,
+            show_update_popup: false,
+            update_status: None,
+        }
+    }
+
+    fn sync_visualizer_states(&mut self) {
+        let count = self.settings.visualizer_count.clamp(1, 6);
+        self.visualizers
+            .resize_with(count, VisualizerState::default);
+    }
+
+    fn poll_update_check(&mut self) {
+        if let Some(rx) = &self.update_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.update_rx = None;
+                match result {
+                    UpdateCheckResult::Available(info) => {
+                        self.update_info = Some(info);
+                        self.show_update_popup = true;
+                    }
+                    UpdateCheckResult::UpToDate => {
+                        self.update_status = Some("Chosen Visualizer is up to date.".to_owned());
+                    }
+                    UpdateCheckResult::Failed(error) => {
+                        self.update_status = Some(format!("Update check failed: {error}"));
+                    }
+                }
+            }
         }
     }
 
@@ -229,6 +267,12 @@ impl ChosenVisualizerApp {
 
                         ui.label(RichText::new("Visualizer").strong().size(14.0));
                         ui.add_space(6.0);
+                        changed |= usize_slider(
+                            ui,
+                            &mut self.settings.visualizer_count,
+                            1..=6,
+                            "Visualizers on screen",
+                        );
                         egui::ComboBox::from_label("Mode")
                             .selected_text(self.settings.mode.label())
                             .show_ui(ui, |ui| {
@@ -716,7 +760,7 @@ impl ChosenVisualizerApp {
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                             ui.label(
-                                RichText::new("v1.0.1 Alpha")
+                                RichText::new(APP_VERSION_LABEL)
                                     .strong()
                                     .color(Color32::from_rgb(202, 207, 213)),
                             );
@@ -731,13 +775,13 @@ impl ChosenVisualizerApp {
                         .show(ui, |ui| {
                             ui.label(RichText::new("Changelog").strong().size(14.0));
                             ui.add_space(4.0);
-                            about_key(ui, "v1.0.1");
+                            about_key(ui, APP_VERSION_LABEL);
                             about_list(
                                 ui,
                                 &[
-                                    "Added a 'Stay on desktop only' toggle to keep the visualizer pinned to the desktop.",
-                                    "Improved the layout of the about section.",
-                                    "Updated version to 1.0.1 Alpha.",
+                                    "Added GitHub release update detection with a dedicated updater window.",
+                                    "Added support for multiple visualizers on screen at the same time.",
+                                    "Updated version to 1.0.2 Early access.",
                                 ],
                             );
                             ui.add_space(8.0);
@@ -841,6 +885,57 @@ impl ChosenVisualizerApp {
                 });
             self.show_about_popup(ctx);
         });
+    }
+
+    fn show_update_popup(&mut self, ctx: &egui::Context) {
+        if !self.show_update_popup {
+            return;
+        }
+
+        let Some(info) = self.update_info.clone() else {
+            self.show_update_popup = false;
+            return;
+        };
+
+        let mut open = self.show_update_popup;
+        egui::Window::new("Chosen Visualizer update available")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(520.0)
+            .show(ctx, |ui| {
+                ui.heading(format!("{} is available", info.version));
+                ui.label(
+                    RichText::new(format!("Installed: {APP_VERSION_LABEL}"))
+                        .color(Color32::from_rgb(170, 174, 178)),
+                );
+                ui.add_space(8.0);
+                ui.label("A newer early-access release was detected on GitHub.");
+                if !info.notes.trim().is_empty() {
+                    ui.separator();
+                    egui::ScrollArea::vertical()
+                        .max_height(160.0)
+                        .show(ui, |ui| {
+                            ui.label(info.notes.trim());
+                        });
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Update now").clicked() {
+                        match updater::launch_update_ui(&info) {
+                            Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                            Err(error) => self.update_status = Some(error),
+                        }
+                    }
+                    if ui.button("Open GitHub release").clicked() {
+                        updater::open_url(&info.page_url);
+                    }
+                    if ui.button("Later").clicked() {
+                        self.show_update_popup = false;
+                    }
+                });
+            });
+        self.show_update_popup = open && self.show_update_popup;
     }
 }
 
@@ -954,8 +1049,10 @@ enum PlacementSize {
 
 impl eframe::App for ChosenVisualizerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_update_check();
         self.handle_tray(ctx);
         self.handle_shortcuts(ctx);
+        self.sync_visualizer_states();
 
         let now = Instant::now();
         let dt = (now - self.last_frame_at).as_secs_f32().clamp(0.001, 0.1);
@@ -979,8 +1076,20 @@ impl eframe::App for ChosenVisualizerApp {
             .frame(egui::Frame::none().fill(panel_fill))
             .show(ctx, |ui| {
                 let rect = ui.max_rect();
-                self.visualizer.paint(ui, rect, &audio, &self.settings, dt);
+                let count = self.visualizers.len().max(1);
+                for (index, visualizer) in self.visualizers.iter_mut().enumerate() {
+                    let mut child_rect = rect;
+                    if count > 1 {
+                        let gap = 10.0;
+                        let height = (rect.height() - gap * (count as f32 - 1.0)) / count as f32;
+                        child_rect.min.y = rect.min.y + index as f32 * (height + gap);
+                        child_rect.max.y = child_rect.min.y + height.max(24.0);
+                    }
+                    visualizer.paint(ui, child_rect, &audio, &self.settings, dt);
+                }
             });
+
+        self.show_update_popup(ctx);
 
         self.apply_window_changes(ctx);
         self.maybe_save();

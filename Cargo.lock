@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "chosen-visualizer"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "eframe",
  "ico",
@@ -739,6 +739,7 @@ dependencies = [
  "reqwest",
  "rustfft",
  "serde",
+ "serde_json",
  "toml",
  "tray-item",
  "windows 0.58.0",
