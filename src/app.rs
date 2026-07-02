@@ -716,7 +716,7 @@ impl ChosenVisualizerApp {
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                             ui.label(
-                                RichText::new("v1.0.0")
+                                RichText::new("v1.0.1 Alpha")
                                     .strong()
                                     .color(Color32::from_rgb(202, 207, 213)),
                             );
@@ -725,82 +725,73 @@ impl ChosenVisualizerApp {
                     ui.add_space(6.0);
                     ui.separator();
 
-                    egui::Grid::new("about_summary_grid")
-                        .num_columns(2)
-                        .spacing(Vec2::new(18.0, 8.0))
-                        .striped(true)
+                    egui::ScrollArea::vertical()
+                        .max_height(400.0)
+                        .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            about_key(ui, "Status");
-                            ui.label("Early Access build, local settings saved automatically");
-                            ui.end_row();
-
-                            about_key(ui, "Info");
-                            ui.label("This build is early access and may contain bugs. Please report issues on GitHub, and does not have auto update. Settings are saved automatically in the app data folder.");
-                            ui.end_row();
-
-                            about_key(ui, "Settings");
-                            ui.label(
-                                RichText::new(settings_path().display().to_string())
-                                    .size(12.0)
-                                    .color(Color32::from_rgb(170, 174, 178)),
+                            ui.label(RichText::new("Changelog").strong().size(14.0));
+                            ui.add_space(4.0);
+                            about_key(ui, "v1.0.1");
+                            about_list(
+                                ui,
+                                &[
+                                    "Added a 'Stay on desktop only' toggle to keep the visualizer pinned to the desktop.",
+                                    "Improved the layout of the about section.",
+                                    "Updated version to 1.0.1 Alpha.",
+                                ],
                             );
-                            ui.end_row();
+                            ui.add_space(8.0);
 
-                            about_key(ui, "Restore");
-                            ui.label("Press F10 or use the tray Open settings action");
-                            ui.end_row();
+                            ui.label(RichText::new("Current focus").strong().size(14.0));
+                            ui.columns(2, |columns| {
+                                about_list(
+                                    &mut columns[0],
+                                    &[
+                                        "Live loopback audio visualization",
+                                        "Screen-aware widget placement",
+                                        "Persistent settings and tray controls",
+                                    ],
+                                );
+                                about_list(
+                                    &mut columns[1],
+                                    &[
+                                        "Visualizer-only widget mode",
+                                        "Scrollable settings panel",
+                                        "Theme and placement presets",
+                                    ],
+                                );
+                            });
+
+                            ui.separator();
+
+                            ui.label(RichText::new("Roadmap").strong().size(14.0));
+                            ui.columns(2, |columns| {
+                                columns[0].label(RichText::new("Near term").strong());
+                                about_list(
+                                    &mut columns[0],
+                                    &[
+                                        "Safer media artwork color extraction",
+                                        "Theme preset browser",
+                                        "Import and export profiles",
+                                        "Hotkeys for common tray actions",
+                                        "Per-monitor DPI polish",
+                                    ],
+                                );
+
+                                columns[1].label(RichText::new("Later").strong());
+                                about_list(
+                                    &mut columns[1],
+                                    &[
+                                        "Taskbar strip mode",
+                                        "Multi-monitor placement profiles",
+                                        "Performance and CPU controls",
+                                        "Audio source picker",
+                                        "Optional startup integration",
+                                    ],
+                                );
+                            });
                         });
 
-                    ui.separator();
-
-                    ui.label(RichText::new("Current focus").strong().size(14.0));
-                    ui.columns(2, |columns| {
-                        about_list(
-                            &mut columns[0],
-                            &[
-                                "Live loopback audio visualization",
-                                "Screen-aware widget placement",
-                                "Persistent settings and tray controls",
-                            ],
-                        );
-                        about_list(
-                            &mut columns[1],
-                            &[
-                                "Visualizer-only widget mode",
-                                "Scrollable settings panel",
-                                "Theme and placement presets",
-                            ],
-                        );
-                    });
-
-                    ui.separator();
-
-                    ui.label(RichText::new("Roadmap").strong().size(14.0));
-                    ui.columns(2, |columns| {
-                        columns[0].label(RichText::new("Near term").strong());
-                        about_list(
-                            &mut columns[0],
-                            &[
-                                "Safer media artwork color extraction",
-                                "Theme preset browser",
-                                "Import and export profiles",
-                                "Hotkeys for common tray actions",
-                                "Per-monitor DPI polish",
-                            ],
-                        );
-
-                        columns[1].label(RichText::new("Later").strong());
-                        about_list(
-                            &mut columns[1],
-                            &[
-                                "Taskbar strip mode",
-                                "Multi-monitor placement profiles",
-                                "Performance and CPU controls",
-                                "Audio source picker",
-                                "Optional startup integration",
-                            ],
-                        );
-                    });
 
                     ui.separator();
                     ui.label(
