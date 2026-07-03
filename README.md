@@ -6,7 +6,7 @@ Chosen Visualizer is a native Rust desktop audio visualizer for Windows. It capt
 
 Copyright (c) 2026 ChosenTechies. All rights reserved.
 
-This repository is public for transparency and release distribution only. You may view the source code, but you may not copy, modify, redistribute, rebrand, sell, or publish derivative versions of the code or assets. See [LICENSE](LICENSE).
+This repository is public for transparency and release distribution only. You may view the source code, but you may not copy, modify, redistribute, rebrand, sell, or publish derivative versions of the code or assets. See [LICENSE](LICENSE). Release history is tracked in [CHANGELOG.md](CHANGELOG.md).
 
 ## Features
 

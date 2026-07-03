@@ -27,7 +27,6 @@ pub struct UpdateAsset {
 pub struct UpdateInfo {
     pub version: String,
     pub tag: String,
-    pub notes: String,
     pub page_url: String,
     pub prerelease: bool,
     pub asset: Option<UpdateAsset>,
@@ -44,7 +43,6 @@ pub enum UpdateCheckResult {
 struct GithubRelease {
     tag_name: String,
     name: Option<String>,
-    body: Option<String>,
     html_url: String,
     draft: bool,
     prerelease: bool,
@@ -112,7 +110,7 @@ fn check_releases() -> UpdateCheckResult {
     let release = releases
         .into_iter()
         .filter(|release| !release.draft && is_newer_release(&release.tag_name))
-        .max_by(|left, right| compare_versions(&left.tag_name, &right.tag_name));
+        .max_by(compare_release_candidates);
 
     let Some(release) = release else {
         return UpdateCheckResult::UpToDate;
@@ -123,7 +121,6 @@ fn check_releases() -> UpdateCheckResult {
     UpdateCheckResult::Available(UpdateInfo {
         version: release.name.unwrap_or_else(|| tag.clone()),
         tag,
-        notes: release.body.unwrap_or_default(),
         page_url: release.html_url,
         prerelease: release.prerelease,
         asset,
@@ -156,6 +153,19 @@ fn is_installable_asset_name(name: &str) -> bool {
 
 fn is_newer_release(tag: &str) -> bool {
     compare_versions(tag, APP_VERSION) == Ordering::Greater
+}
+
+fn compare_release_candidates(left: &GithubRelease, right: &GithubRelease) -> Ordering {
+    let version_order = compare_versions(&left.tag_name, &right.tag_name);
+    if version_order != Ordering::Equal {
+        return version_order;
+    }
+
+    match (left.prerelease, right.prerelease) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        _ => Ordering::Equal,
+    }
 }
 
 fn compare_versions(left: &str, right: &str) -> Ordering {
@@ -192,7 +202,6 @@ pub fn launch_update_ui(info: &UpdateInfo) -> Result<(), String> {
 
 pub struct UpdatingApp {
     download_url: String,
-    release_url: String,
     asset_name: String,
     status: String,
     started: bool,
@@ -201,10 +210,9 @@ pub struct UpdatingApp {
 }
 
 impl UpdatingApp {
-    pub fn new(download_url: String, release_url: String, asset_name: String) -> Self {
+    pub fn new(download_url: String, _release_url: String, asset_name: String) -> Self {
         Self {
             download_url,
-            release_url,
             asset_name,
             status: "Preparing the GitHub release download...".to_owned(),
             started: false,
@@ -249,6 +257,7 @@ impl eframe::App for UpdatingApp {
                 self.status = match result {
                     Ok(path) => match open_installer(&path) {
                         Ok(()) => {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             format!("Downloaded {}. The installer was opened.", path.display())
                         }
                         Err(error) => {
@@ -309,9 +318,6 @@ impl eframe::App for UpdatingApp {
                     });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Open release page").clicked() {
-                        open_url(&self.release_url);
-                    }
                     if self.failed && ui.button("Retry").clicked() {
                         self.retry();
                     }
@@ -391,21 +397,11 @@ fn open_installer(path: &Path) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-pub fn open_url(url: &str) {
-    #[cfg(windows)]
-    {
-        let _ = Command::new("cmd").args(["/C", "start", "", url]).spawn();
-    }
-
-    #[cfg(not(windows))]
-    {
-        let _ = Command::new("xdg-open").arg(url).spawn();
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{compare_versions, is_installable_asset_name};
+    use super::{
+        GithubRelease, compare_release_candidates, compare_versions, is_installable_asset_name,
+    };
     use std::cmp::Ordering;
 
     #[test]
@@ -413,6 +409,27 @@ mod tests {
         assert_eq!(compare_versions("v1.0.3", "1.0.2"), Ordering::Greater);
         assert_eq!(compare_versions("1.0.2", "v1.0.2"), Ordering::Equal);
         assert_eq!(compare_versions("v1.0.1", "1.0.2"), Ordering::Less);
+    }
+
+    #[test]
+    fn prefers_stable_release_when_versions_match() {
+        let stable = test_release("v1.0.3", false);
+        let prerelease = test_release("v1.0.3-test", true);
+        assert_eq!(
+            compare_release_candidates(&stable, &prerelease),
+            Ordering::Greater
+        );
+    }
+
+    fn test_release(tag_name: &str, prerelease: bool) -> GithubRelease {
+        GithubRelease {
+            tag_name: tag_name.to_owned(),
+            name: None,
+            html_url: String::new(),
+            draft: false,
+            prerelease,
+            assets: Vec::new(),
+        }
     }
 
     #[test]

@@ -87,6 +87,26 @@ impl ChosenVisualizerApp {
         self.update_rx = Some(updater::start_update_check());
     }
 
+    fn install_update(
+        &mut self,
+        info: &UpdateInfo,
+        active_ctx: &egui::Context,
+        main_ctx: Option<&egui::Context>,
+    ) {
+        match updater::launch_update_ui(info) {
+            Ok(()) => {
+                self.show_update_popup = false;
+                self.settings.show_settings = false;
+                self.mark_changed();
+                active_ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                if let Some(main_ctx) = main_ctx {
+                    main_ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+            Err(error) => self.update_status = Some(error),
+        }
+    }
+
     fn poll_update_check(&mut self) {
         if let Some(rx) = &self.update_rx {
             if let Ok(result) = rx.try_recv() {
@@ -232,10 +252,7 @@ impl ChosenVisualizerApp {
                             .on_hover_text("Download the installer attached to the GitHub release")
                             .clicked()
                         {
-                            match updater::launch_update_ui(&info) {
-                                Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-                                Err(error) => self.update_status = Some(error),
-                            }
+                            self.install_update(&info, ctx, None);
                         }
                     }
                     if ui.button("About").clicked() {
@@ -606,7 +623,7 @@ impl ChosenVisualizerApp {
         }
     }
 
-    fn settings_top_bar(&mut self, ctx: &egui::Context) {
+    fn settings_top_bar(&mut self, ctx: &egui::Context, parent_ctx: &egui::Context) {
         egui::TopBottomPanel::top("settings_window_top_bar")
             .exact_height(50.0)
             .frame(
@@ -642,10 +659,7 @@ impl ChosenVisualizerApp {
                             .add_enabled(info.asset.is_some(), egui::Button::new("Install update"))
                             .clicked()
                         {
-                            match updater::launch_update_ui(&info) {
-                                Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-                                Err(error) => self.update_status = Some(error),
-                            }
+                            self.install_update(&info, ctx, Some(parent_ctx));
                         }
                     }
                     if ui.button("About").clicked() {
@@ -863,9 +877,9 @@ impl ChosenVisualizerApp {
                             about_list(
                                 ui,
                                 &[
-                                    "Updater now checks ChosenTechies GitHub releases and validates installer assets.",
-                                    "Added support for multiple visualizers on screen at the same time.",
-                                    "Version labels now come from Cargo package metadata.",
+                                    "Published updater checks against public GitHub releases without embedded tokens.",
+                                    "Install update now closes the widget/settings windows before launching the updater.",
+                                    "Release selection now prefers stable tags over matching test pre-releases.",
                                 ],
                             );
                             ui.add_space(8.0);
@@ -957,7 +971,7 @@ impl ChosenVisualizerApp {
                 self.mark_changed();
             }
 
-            self.settings_top_bar(ctx);
+            self.settings_top_bar(ctx, parent_ctx);
             self.settings_panel(ctx, audio);
 
             egui::CentralPanel::default()
@@ -1033,32 +1047,18 @@ impl ChosenVisualizerApp {
                             }
                         });
 
-                    if !info.notes.trim().is_empty() {
-                        ui.add_space(8.0);
-                        egui::ScrollArea::vertical()
-                            .max_height(170.0)
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                ui.label(info.notes.trim());
-                            });
-                    }
 
                     ui.separator();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("Later").clicked() {
                             self.show_update_popup = false;
                         }
-                        if ui.button("Open GitHub release").clicked() {
-                            updater::open_url(&info.page_url);
-                        }
+
                         if ui
                             .add_enabled(info.asset.is_some(), egui::Button::new("Install update"))
                             .clicked()
                         {
-                            match updater::launch_update_ui(&info) {
-                                Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
-                                Err(error) => self.update_status = Some(error),
-                            }
+                            self.install_update(&info, ctx, None);
                         }
                     });
                 });
