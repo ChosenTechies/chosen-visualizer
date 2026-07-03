@@ -1,3 +1,4 @@
+use crate::settings::settings_path;
 use eframe::{
     egui,
     egui::{Color32, RichText, Stroke, Vec2},
@@ -5,7 +6,7 @@ use eframe::{
 use serde::Deserialize;
 use std::{
     cmp::Ordering,
-    env,
+    env, fs, io,
     path::{Path, PathBuf},
     process::Command,
     sync::mpsc::{self, Receiver},
@@ -16,6 +17,10 @@ use std::{
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const APP_VERSION_LABEL: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 const DEFAULT_REPOSITORY: &str = "ChosenTechies/chosen-visualizer";
+const INSTALLED_EXE_NAME: &str = "chosen-visualizer.exe";
+const UPDATER_EXE_NAME: &str = "chosen-visualizer-updater.exe";
+const PARTIAL_EXE_NAME: &str = "chosen-visualizer.exe.download";
+const DESKTOP_SHORTCUT_NAME: &str = "Chosen Visualizer.lnk";
 
 #[derive(Clone, Debug)]
 pub struct UpdateAsset {
@@ -140,12 +145,11 @@ fn update_asset(asset: &GithubAsset) -> Option<UpdateAsset> {
 
 fn is_installable_asset_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    let is_windows_installer = lower.ends_with(".msi")
-        || (lower.ends_with(".exe")
-            && (lower.contains("setup")
-                || lower.contains("install")
-                || lower.contains("chosen-visualizer")));
-    is_windows_installer
+    let is_windows_exe = lower.ends_with(".exe")
+        && (lower.contains("setup")
+            || lower.contains("install")
+            || lower.contains("chosen-visualizer"));
+    is_windows_exe
         && !lower.contains("debug")
         && !lower.ends_with(".pdb")
         && !lower.ends_with(".zip")
@@ -187,17 +191,35 @@ fn version_numbers(value: &str) -> Vec<u32> {
 
 pub fn launch_update_ui(info: &UpdateInfo) -> Result<(), String> {
     let Some(asset) = &info.asset else {
-        return Err("This GitHub release does not include a Windows installer asset.".to_owned());
+        return Err("This GitHub release does not include a Windows executable asset.".to_owned());
     };
 
-    let exe = env::current_exe().map_err(|error| error.to_string())?;
-    let mut command = Command::new(exe);
+    let helper = prepare_update_helper()?;
+    let mut command = Command::new(helper);
     command.arg("--update-ui");
     command.arg(&asset.download_url);
     command.arg(&info.page_url);
     command.arg(&asset.name);
     command.spawn().map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn prepare_update_helper() -> Result<PathBuf, String> {
+    let install_dir = app_install_dir()?;
+    fs::create_dir_all(&install_dir).map_err(|error| error.to_string())?;
+
+    let current_exe = env::current_exe().map_err(|error| error.to_string())?;
+    let helper = install_dir.join(UPDATER_EXE_NAME);
+    if !same_path(&current_exe, &helper) {
+        fs::copy(&current_exe, &helper).map_err(|error| {
+            format!(
+                "Could not prepare the update helper at {}: {error}",
+                helper.display()
+            )
+        })?;
+    }
+
+    Ok(helper)
 }
 
 pub struct UpdatingApp {
@@ -214,7 +236,7 @@ impl UpdatingApp {
         Self {
             download_url,
             asset_name,
-            status: "Preparing the GitHub release download...".to_owned(),
+            status: format!("Preparing update install in {}...", app_install_dir_label()),
             started: false,
             failed: false,
             result_rx: None,
@@ -227,12 +249,15 @@ impl UpdatingApp {
         }
         self.started = true;
         self.failed = false;
-        self.status = format!("Downloading {} from GitHub...", self.asset_name);
+        self.status = format!(
+            "Downloading {} and installing it as {}...",
+            self.asset_name, INSTALLED_EXE_NAME
+        );
         let download_url = self.download_url.clone();
         let asset_name = self.asset_name.clone();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let result = download_update(&download_url, &asset_name);
+            let result = install_update(&download_url, &asset_name);
             let _ = tx.send(result);
         });
         self.result_rx = Some(rx);
@@ -255,15 +280,15 @@ impl eframe::App for UpdatingApp {
             if let Ok(result) = rx.try_recv() {
                 self.result_rx = None;
                 self.status = match result {
-                    Ok(path) => match open_installer(&path) {
+                    Ok(path) => match open_installed_app(&path) {
                         Ok(()) => {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                            format!("Downloaded {}. The installer was opened.", path.display())
+                            format!("Installed {} and opened the new version.", path.display())
                         }
                         Err(error) => {
                             self.failed = true;
                             format!(
-                                "Downloaded {}, but could not open it: {error}",
+                                "Installed {}, but could not open it: {error}",
                                 path.display()
                             )
                         }
@@ -305,7 +330,7 @@ impl eframe::App for UpdatingApp {
                     .inner_margin(egui::Margin::symmetric(16.0, 14.0))
                     .show(ui, |ui| {
                         ui.label(
-                            RichText::new(&self.asset_name)
+                            RichText::new(INSTALLED_EXE_NAME)
                                 .strong()
                                 .color(Color32::from_rgb(226, 231, 236)),
                         );
@@ -328,13 +353,13 @@ impl eframe::App for UpdatingApp {
     }
 }
 
-fn download_update(download_url: &str, asset_name: &str) -> Result<PathBuf, String> {
+fn install_update(download_url: &str, asset_name: &str) -> Result<PathBuf, String> {
     if !download_url.starts_with("https://") {
         return Err("The release asset URL is not a secure GitHub download URL.".to_owned());
     }
     if !is_installable_asset_name(asset_name) {
         return Err(format!(
-            "{asset_name} is not a supported Windows installer asset."
+            "{asset_name} is not a supported Windows executable asset."
         ));
     }
 
@@ -351,50 +376,135 @@ fn download_update(download_url: &str, asset_name: &str) -> Result<PathBuf, Stri
         return Err(format!("GitHub download failed with {}", response.status()));
     }
 
-    let path = env::temp_dir().join(safe_asset_file_name(asset_name));
+    let install_dir = app_install_dir()?;
+    fs::create_dir_all(&install_dir).map_err(|error| error.to_string())?;
+    let final_path = install_dir.join(INSTALLED_EXE_NAME);
+    let partial_path = install_dir.join(PARTIAL_EXE_NAME);
+
     let bytes = response.bytes().map_err(|error| error.to_string())?;
-    std::fs::write(&path, bytes).map_err(|error| error.to_string())?;
-    Ok(path)
+    fs::write(&partial_path, bytes).map_err(|error| error.to_string())?;
+    replace_installed_exe(&partial_path, &final_path)?;
+    create_desktop_shortcut(&final_path)?;
+
+    Ok(final_path)
 }
 
-fn safe_asset_file_name(name: &str) -> String {
-    let file_name: String = name
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_') {
-                character
-            } else {
-                '_'
+fn app_install_dir() -> Result<PathBuf, String> {
+    settings_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "Could not resolve the Chosen Visualizer settings folder.".to_owned())
+}
+
+fn app_install_dir_label() -> String {
+    app_install_dir()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|error| error)
+}
+
+fn replace_installed_exe(partial_path: &Path, final_path: &Path) -> Result<(), String> {
+    let mut last_error = String::new();
+
+    for _ in 0..24 {
+        match fs::remove_file(final_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                last_error = error.to_string();
+                thread::sleep(Duration::from_millis(250));
+                continue;
             }
-        })
-        .collect();
+        }
 
-    if file_name.trim_matches('_').is_empty() {
-        "chosen-visualizer-update.exe".to_owned()
-    } else {
-        file_name
+        match fs::rename(partial_path, final_path) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                last_error = error.to_string();
+                thread::sleep(Duration::from_millis(250));
+            }
+        }
     }
+
+    Err(format!(
+        "Could not replace {}. Close any running Chosen Visualizer windows and retry. Last error: {last_error}",
+        final_path.display()
+    ))
 }
 
-fn open_installer(path: &Path) -> Result<(), String> {
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
-    let mut command = if extension == "msi" {
-        let mut command = Command::new("msiexec");
-        command.arg("/i").arg(path);
-        command
-    } else {
-        Command::new(path)
-    };
-
+fn open_installed_app(path: &Path) -> Result<(), String> {
+    let mut command = Command::new(path);
+    if let Some(parent) = path.parent() {
+        command.current_dir(parent);
+    }
     command
         .spawn()
         .map(|_| ())
         .map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+fn create_desktop_shortcut(target: &Path) -> Result<(), String> {
+    let target = target
+        .canonicalize()
+        .unwrap_or_else(|_| target.to_path_buf());
+    let working_directory = target
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let icon_location = format!("{},0", target.display());
+    let script = format!(
+        "$desktop = [Environment]::GetFolderPath('Desktop'); \
+         $shortcutPath = Join-Path $desktop {}; \
+         $shell = New-Object -ComObject WScript.Shell; \
+         $shortcut = $shell.CreateShortcut($shortcutPath); \
+         $shortcut.TargetPath = {}; \
+         $shortcut.WorkingDirectory = {}; \
+         $shortcut.IconLocation = {}; \
+         $shortcut.Save();",
+        powershell_quote(DESKTOP_SHORTCUT_NAME),
+        powershell_quote(&target.display().to_string()),
+        powershell_quote(&working_directory.display().to_string()),
+        powershell_quote(&icon_location),
+    );
+
+    let status = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &script,
+        ])
+        .status()
+        .map_err(|error| error.to_string())?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Could not create the desktop shortcut: {status}"))
+    }
+}
+
+#[cfg(not(windows))]
+fn create_desktop_shortcut(_target: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(windows)]
+fn powershell_quote(value: &str) -> String {
+    format!("'{}'", value.replace("'", "''"))
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    let left = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
+    let right = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
+
+    if cfg!(windows) {
+        left.to_string_lossy()
+            .eq_ignore_ascii_case(&right.to_string_lossy())
+    } else {
+        left == right
+    }
 }
 
 #[cfg(test)]
@@ -406,15 +516,15 @@ mod tests {
 
     #[test]
     fn compares_version_tags() {
-        assert_eq!(compare_versions("v1.0.3", "1.0.2"), Ordering::Greater);
-        assert_eq!(compare_versions("1.0.2", "v1.0.2"), Ordering::Equal);
-        assert_eq!(compare_versions("v1.0.1", "1.0.2"), Ordering::Less);
+        assert_eq!(compare_versions("v1.0.4", "1.0.3"), Ordering::Greater);
+        assert_eq!(compare_versions("1.0.3", "v1.0.3"), Ordering::Equal);
+        assert_eq!(compare_versions("v1.0.2", "1.0.3"), Ordering::Less);
     }
 
     #[test]
     fn prefers_stable_release_when_versions_match() {
-        let stable = test_release("v1.0.3", false);
-        let prerelease = test_release("v1.0.3-test", true);
+        let stable = test_release("v1.0.4", false);
+        let prerelease = test_release("v1.0.4-test", true);
         assert_eq!(
             compare_release_candidates(&stable, &prerelease),
             Ordering::Greater
@@ -433,9 +543,10 @@ mod tests {
     }
 
     #[test]
-    fn only_installs_windows_assets() {
-        assert!(is_installable_asset_name("chosen-visualizer-installer.exe"));
-        assert!(is_installable_asset_name("ChosenVisualizerSetup.msi"));
+    fn only_installs_windows_exe_assets() {
+        assert!(is_installable_asset_name("chosen-visualizer-v1.0.4.exe"));
+        assert!(is_installable_asset_name("ChosenVisualizerSetup.exe"));
+        assert!(!is_installable_asset_name("ChosenVisualizerSetup.msi"));
         assert!(!is_installable_asset_name("source.zip"));
         assert!(!is_installable_asset_name("chosen-visualizer.pdb"));
     }

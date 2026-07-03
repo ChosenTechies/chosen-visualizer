@@ -1004,9 +1004,13 @@ impl ChosenVisualizerApp {
             .show(ctx, |ui| {
                 ui.vertical(|ui| {
                     ui.label(
-                        RichText::new(if info.prerelease { "GitHub pre-release" } else { "GitHub release" })
-                            .size(12.0)
-                            .color(Color32::from_rgb(141, 150, 162)),
+                        RichText::new(if info.prerelease {
+                            "GitHub pre-release"
+                        } else {
+                            "GitHub release"
+                        })
+                        .size(12.0)
+                        .color(Color32::from_rgb(141, 150, 162)),
                     );
                     ui.heading(
                         RichText::new(&info.version)
@@ -1014,8 +1018,11 @@ impl ChosenVisualizerApp {
                             .color(Color32::from_rgb(238, 240, 243)),
                     );
                     ui.label(
-                        RichText::new(format!("Installed: {APP_VERSION_LABEL}  |  Available tag: {}", info.tag))
-                            .color(Color32::from_rgb(170, 174, 178)),
+                        RichText::new(format!(
+                            "Installed: {APP_VERSION_LABEL}  |  Available tag: {}",
+                            info.tag
+                        ))
+                        .color(Color32::from_rgb(170, 174, 178)),
                     );
                     ui.add_space(10.0);
 
@@ -1041,12 +1048,13 @@ impl ChosenVisualizerApp {
                                         .color(Color32::from_rgb(220, 185, 145)),
                                 );
                                 ui.label(
-                                    RichText::new("This release has no .exe or .msi installer asset attached.")
-                                        .color(Color32::from_rgb(178, 185, 194)),
+                                    RichText::new(
+                                        "This release has no Windows .exe asset attached.",
+                                    )
+                                    .color(Color32::from_rgb(178, 185, 194)),
                                 );
                             }
                         });
-
 
                     ui.separator();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

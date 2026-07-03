@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "chosen-visualizer"
-version = "1.0.3"
+version = "1.0.4"
 dependencies = [
  "eframe",
  "ico",

@@ -1,5 +1,12 @@
-﻿# Changelog
+# Changelog
 
+## 1.0.4 - 2026-07-03
+
+- Installs downloaded updates into the Chosen Visualizer settings folder instead of the system temp folder.
+- Saves the installed application as `chosen-visualizer.exe` without a version number in the filename.
+- Runs updates through `chosen-visualizer-updater.exe` in the same folder so the main executable can be replaced.
+- Creates or updates the desktop shortcut to point at the installed executable.
+- Opens the newly installed executable after the old app closes.
 ## 1.0.3 - 2026-07-03
 
 - Published the updater flow against public GitHub releases, with no embedded GitHub token support.

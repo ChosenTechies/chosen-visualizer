@@ -1,9 +1,10 @@
 #[cfg(windows)]
+use crate::settings::settings_path;
+#[cfg(windows)]
 use std::sync::{
     Arc,
     atomic::{AtomicU8, Ordering},
 };
-#[cfg(windows)]
 use std::{env, path::PathBuf};
 #[cfg(windows)]
 use std::{thread, time::Duration};
@@ -183,7 +184,13 @@ fn ensure_logo_ico() -> Option<PathBuf> {
         icon_dir.add_entry(entry);
     }
 
-    let out_path = env::temp_dir().join("chosen-visualizer-tray.ico");
+    let out_path = settings_path()
+        .parent()
+        .map(|path| path.join("chosen-visualizer-tray.ico"))
+        .unwrap_or_else(|| PathBuf::from("chosen-visualizer-tray.ico"));
+    if let Some(parent) = out_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
     let mut file = std::fs::File::create(&out_path).ok()?;
     icon_dir.write(&mut file).ok()?;
     Some(out_path)
