@@ -155,6 +155,11 @@ fn is_installable_asset_name(name: &str) -> bool {
         && !lower.ends_with(".zip")
 }
 
+fn is_versioned_update_asset_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.starts_with("chosen-visualizer-v") && lower.ends_with(".exe")
+}
+
 fn is_newer_release(tag: &str) -> bool {
     compare_versions(tag, APP_VERSION) == Ordering::Greater
 }
@@ -220,6 +225,35 @@ fn prepare_update_helper() -> Result<PathBuf, String> {
     }
 
     Ok(helper)
+}
+
+pub fn install_launched_update_asset() -> Result<bool, String> {
+    let current_exe = env::current_exe().map_err(|error| error.to_string())?;
+    let Some(file_name) = current_exe.file_name().and_then(|name| name.to_str()) else {
+        return Ok(false);
+    };
+    if !is_versioned_update_asset_name(file_name) {
+        return Ok(false);
+    }
+
+    let install_dir = app_install_dir()?;
+    fs::create_dir_all(&install_dir).map_err(|error| error.to_string())?;
+    let final_path = install_dir.join(INSTALLED_EXE_NAME);
+    if same_path(&current_exe, &final_path) {
+        return Ok(false);
+    }
+
+    let partial_path = install_dir.join(PARTIAL_EXE_NAME);
+    fs::copy(&current_exe, &partial_path).map_err(|error| {
+        format!(
+            "Could not stage the update at {}: {error}",
+            partial_path.display()
+        )
+    })?;
+    replace_installed_exe(&partial_path, &final_path)?;
+    create_desktop_shortcut(&final_path)?;
+    open_installed_app(&final_path)?;
+    Ok(true)
 }
 
 pub struct UpdatingApp {
@@ -516,15 +550,15 @@ mod tests {
 
     #[test]
     fn compares_version_tags() {
-        assert_eq!(compare_versions("v1.0.4", "1.0.3"), Ordering::Greater);
-        assert_eq!(compare_versions("1.0.3", "v1.0.3"), Ordering::Equal);
-        assert_eq!(compare_versions("v1.0.2", "1.0.3"), Ordering::Less);
+        assert_eq!(compare_versions("v1.0.5", "1.0.4"), Ordering::Greater);
+        assert_eq!(compare_versions("1.0.4", "v1.0.4"), Ordering::Equal);
+        assert_eq!(compare_versions("v1.0.3", "1.0.4"), Ordering::Less);
     }
 
     #[test]
     fn prefers_stable_release_when_versions_match() {
-        let stable = test_release("v1.0.4", false);
-        let prerelease = test_release("v1.0.4-test", true);
+        let stable = test_release("v1.0.5", false);
+        let prerelease = test_release("v1.0.5-test", true);
         assert_eq!(
             compare_release_candidates(&stable, &prerelease),
             Ordering::Greater
@@ -544,10 +578,23 @@ mod tests {
 
     #[test]
     fn only_installs_windows_exe_assets() {
-        assert!(is_installable_asset_name("chosen-visualizer-v1.0.4.exe"));
+        assert!(is_installable_asset_name("chosen-visualizer-v1.0.5.exe"));
         assert!(is_installable_asset_name("ChosenVisualizerSetup.exe"));
         assert!(!is_installable_asset_name("ChosenVisualizerSetup.msi"));
         assert!(!is_installable_asset_name("source.zip"));
         assert!(!is_installable_asset_name("chosen-visualizer.pdb"));
+    }
+
+    #[test]
+    fn recognizes_versioned_update_assets() {
+        assert!(super::is_versioned_update_asset_name(
+            "chosen-visualizer-v1.0.5.exe"
+        ));
+        assert!(!super::is_versioned_update_asset_name(
+            "chosen-visualizer.exe"
+        ));
+        assert!(!super::is_versioned_update_asset_name(
+            "chosen-visualizer-updater.exe"
+        ));
     }
 }

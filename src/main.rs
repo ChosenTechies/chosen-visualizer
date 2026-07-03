@@ -24,6 +24,10 @@ fn main() -> eframe::Result<()> {
         return run_updater(download_url, release_url, asset_name);
     }
 
+    if updater::install_launched_update_asset().unwrap_or(false) {
+        return Ok(());
+    }
+
     let app_icon =
         eframe::icon_data::from_png_bytes(include_bytes!("../chosen-visualizer.png")).ok();
 

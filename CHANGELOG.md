@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.5 - 2026-07-03
+
+- Adds a self-install bridge for versioned GitHub release executables launched by older updaters.
+- Installs a directly launched release executable into `%APPDATA%\Chosen Visualizer\chosen-visualizer.exe`.
+- Updates the desktop shortcut and opens the stable installed executable after self-installing.
 ## 1.0.4 - 2026-07-03
 
 - Installs downloaded updates into the Chosen Visualizer settings folder instead of the system temp folder.
