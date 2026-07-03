@@ -476,6 +476,11 @@ fn open_installed_app(path: &Path) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+pub fn create_desktop_shortcut_for_current_exe() -> Result<(), String> {
+    let current_exe = env::current_exe().map_err(|error| error.to_string())?;
+    create_desktop_shortcut(&current_exe)
+}
+
 #[cfg(windows)]
 fn create_desktop_shortcut(target: &Path) -> Result<(), String> {
     let target = target
@@ -550,15 +555,15 @@ mod tests {
 
     #[test]
     fn compares_version_tags() {
-        assert_eq!(compare_versions("v1.0.5", "1.0.4"), Ordering::Greater);
-        assert_eq!(compare_versions("1.0.4", "v1.0.4"), Ordering::Equal);
-        assert_eq!(compare_versions("v1.0.3", "1.0.4"), Ordering::Less);
+        assert_eq!(compare_versions("v1.0.6", "1.0.5"), Ordering::Greater);
+        assert_eq!(compare_versions("1.0.5", "v1.0.5"), Ordering::Equal);
+        assert_eq!(compare_versions("v1.0.4", "1.0.5"), Ordering::Less);
     }
 
     #[test]
     fn prefers_stable_release_when_versions_match() {
-        let stable = test_release("v1.0.5", false);
-        let prerelease = test_release("v1.0.5-test", true);
+        let stable = test_release("v1.0.6", false);
+        let prerelease = test_release("v1.0.6-test", true);
         assert_eq!(
             compare_release_candidates(&stable, &prerelease),
             Ordering::Greater
@@ -578,7 +583,7 @@ mod tests {
 
     #[test]
     fn only_installs_windows_exe_assets() {
-        assert!(is_installable_asset_name("chosen-visualizer-v1.0.5.exe"));
+        assert!(is_installable_asset_name("chosen-visualizer-v1.0.6.exe"));
         assert!(is_installable_asset_name("ChosenVisualizerSetup.exe"));
         assert!(!is_installable_asset_name("ChosenVisualizerSetup.msi"));
         assert!(!is_installable_asset_name("source.zip"));
@@ -588,7 +593,7 @@ mod tests {
     #[test]
     fn recognizes_versioned_update_assets() {
         assert!(super::is_versioned_update_asset_name(
-            "chosen-visualizer-v1.0.5.exe"
+            "chosen-visualizer-v1.0.6.exe"
         ));
         assert!(!super::is_versioned_update_asset_name(
             "chosen-visualizer.exe"

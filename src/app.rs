@@ -17,6 +17,40 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[derive(Clone, Copy)]
+struct ShortcutPromptRestore {
+    show_settings: bool,
+    show_top_bar: bool,
+    visualizer_only_widget: bool,
+    click_through: bool,
+    frameless: bool,
+    desktop_widget: bool,
+    desktop_only: bool,
+}
+
+impl ShortcutPromptRestore {
+    fn from(settings: &Settings) -> Self {
+        Self {
+            show_settings: settings.show_settings,
+            show_top_bar: settings.show_top_bar,
+            visualizer_only_widget: settings.visualizer_only_widget,
+            click_through: settings.click_through,
+            frameless: settings.frameless,
+            desktop_widget: settings.desktop_widget,
+            desktop_only: settings.desktop_only,
+        }
+    }
+
+    fn apply(self, settings: &mut Settings) {
+        settings.show_settings = self.show_settings;
+        settings.show_top_bar = self.show_top_bar;
+        settings.visualizer_only_widget = self.visualizer_only_widget;
+        settings.click_through = self.click_through;
+        settings.frameless = self.frameless;
+        settings.desktop_widget = self.desktop_widget;
+        settings.desktop_only = self.desktop_only;
+    }
+}
 pub struct ChosenVisualizerApp {
     title: &'static str,
     audio: AudioEngine,
@@ -34,12 +68,29 @@ pub struct ChosenVisualizerApp {
     update_info: Option<UpdateInfo>,
     show_update_popup: bool,
     update_status: Option<String>,
+    show_shortcut_prompt: bool,
+    shortcut_status: Option<String>,
+    shortcut_prompt_restore: Option<ShortcutPromptRestore>,
 }
 
 impl ChosenVisualizerApp {
     pub fn new(cc: &eframe::CreationContext<'_>, title: &'static str) -> Self {
         install_style(&cc.egui_ctx);
-        let settings = Settings::load();
+        let mut settings = Settings::load();
+        let show_shortcut_prompt = !settings.desktop_shortcut_prompted;
+        let shortcut_prompt_restore = if show_shortcut_prompt {
+            let restore = ShortcutPromptRestore::from(&settings);
+            settings.show_settings = true;
+            settings.show_top_bar = true;
+            settings.desktop_widget = false;
+            settings.desktop_only = false;
+            settings.visualizer_only_widget = false;
+            settings.click_through = false;
+            settings.frameless = false;
+            Some(restore)
+        } else {
+            None
+        };
         let native_window = native_window_handle(cc);
         let tray = tray::init(cc.egui_ctx.clone());
         window_control::apply_egui_viewport(&cc.egui_ctx, &settings);
@@ -65,6 +116,9 @@ impl ChosenVisualizerApp {
                 "Checking GitHub releases in {}...",
                 updater::repository()
             )),
+            show_shortcut_prompt,
+            shortcut_status: None,
+            shortcut_prompt_restore,
         }
     }
 
@@ -104,6 +158,36 @@ impl ChosenVisualizerApp {
                 }
             }
             Err(error) => self.update_status = Some(error),
+        }
+    }
+
+    fn create_desktop_shortcut(&mut self) {
+        match updater::create_desktop_shortcut_for_current_exe() {
+            Ok(()) => {
+                self.settings.desktop_shortcut_prompted = true;
+                self.settings.desktop_shortcut_created = true;
+                self.shortcut_status = Some("Desktop shortcut created.".to_owned());
+                self.show_shortcut_prompt = false;
+                self.restore_shortcut_prompt_settings();
+                self.mark_changed();
+            }
+            Err(error) => {
+                self.shortcut_status = Some(format!("Could not create desktop shortcut: {error}"));
+            }
+        }
+    }
+
+    fn dismiss_shortcut_prompt(&mut self) {
+        self.settings.desktop_shortcut_prompted = true;
+        self.show_shortcut_prompt = false;
+        self.shortcut_status = None;
+        self.restore_shortcut_prompt_settings();
+        self.mark_changed();
+    }
+
+    fn restore_shortcut_prompt_settings(&mut self) {
+        if let Some(restore) = self.shortcut_prompt_restore.take() {
+            restore.apply(&mut self.settings);
         }
     }
 
@@ -845,115 +929,156 @@ impl ChosenVisualizerApp {
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .default_width(560.0)
+            .default_width(600.0)
             .show(ctx, |ui| {
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.heading(RichText::new(self.title).size(20.0));
-                            ui.label(
-                                RichText::new("Audio-reactive desktop visualizer")
-                                    .color(Color32::from_rgb(170, 174, 178)),
-                            );
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                            ui.label(
-                                RichText::new(APP_VERSION_LABEL)
-                                    .strong()
-                                    .color(Color32::from_rgb(202, 207, 213)),
-                            );
+                ui.spacing_mut().item_spacing = Vec2::new(10.0, 10.0);
+                egui::Frame::none()
+                    .fill(Color32::from_rgb(24, 27, 31))
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(48, 54, 62)))
+                    .inner_margin(egui::Margin::symmetric(18.0, 16.0))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new(self.title)
+                                        .size(24.0)
+                                        .strong()
+                                        .color(Color32::from_rgb(238, 240, 243)),
+                                );
+                                ui.label(
+                                    RichText::new("Desktop audio visualizer")
+                                        .color(Color32::from_rgb(167, 176, 188)),
+                                );
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    RichText::new(APP_VERSION_LABEL)
+                                        .strong()
+                                        .color(Color32::from_rgb(198, 218, 205)),
+                                );
+                            });
                         });
                     });
-                    ui.add_space(6.0);
-                    ui.separator();
 
-                    egui::ScrollArea::vertical()
-                        .max_height(400.0)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.label(RichText::new("Changelog").strong().size(14.0));
-                            ui.add_space(4.0);
-                            about_key(ui, APP_VERSION_LABEL);
-                            about_list(
-                                ui,
-                                &[
-                                    "Published updater checks against public GitHub releases without embedded tokens.",
-                                    "Install update now closes the widget/settings windows before launching the updater.",
-                                    "Release selection now prefers stable tags over matching test pre-releases.",
-                                ],
-                            );
-                            ui.add_space(8.0);
+                ui.columns(3, |columns| {
+                    about_stat(&mut columns[0], "Audio", "Loopback capture with fallback preview");
+                    about_stat(&mut columns[1], "Widget", "Desktop placement and tray controls");
+                    about_stat(&mut columns[2], "Updates", "Public GitHub releases");
+                });
 
-                            ui.label(RichText::new("Current focus").strong().size(14.0));
-                            ui.columns(2, |columns| {
-                                about_list(
-                                    &mut columns[0],
-                                    &[
-                                        "Live loopback audio visualization",
-                                        "Screen-aware widget placement",
-                                        "Persistent settings and tray controls",
-                                    ],
-                                );
-                                about_list(
-                                    &mut columns[1],
-                                    &[
-                                        "Visualizer-only widget mode",
-                                        "Scrollable settings panel",
-                                        "Theme and placement presets",
-                                    ],
-                                );
-                            });
+                egui::Frame::none()
+                    .fill(Color32::from_rgb(18, 20, 23))
+                    .stroke(Stroke::new(1.0, Color32::from_rgb(42, 47, 54)))
+                    .inner_margin(egui::Margin::symmetric(16.0, 14.0))
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new(APP_VERSION_LABEL)
+                                .strong()
+                                .color(Color32::from_rgb(226, 231, 236)),
+                        );
+                        ui.add_space(4.0);
+                        about_list(
+                            ui,
+                            &[
+                                "Updates install into the Chosen Visualizer app folder with a stable executable name.",
+                                "Desktop shortcuts are created from the app instead of depending on the updater.",
+                                "Visualizer-only widgets keep a subtle idle motion while audio is silent.",
+                            ],
+                        );
+                    });
 
-                            ui.separator();
-
-                            ui.label(RichText::new("Roadmap").strong().size(14.0));
-                            ui.columns(2, |columns| {
-                                columns[0].label(RichText::new("Near term").strong());
-                                about_list(
-                                    &mut columns[0],
-                                    &[
-                                        "Safer media artwork color extraction",
-                                        "Theme preset browser",
-                                        "Import and export profiles",
-                                        "Hotkeys for common tray actions",
-                                        "Per-monitor DPI polish",
-                                    ],
-                                );
-
-                                columns[1].label(RichText::new("Later").strong());
-                                about_list(
-                                    &mut columns[1],
-                                    &[
-                                        "Taskbar strip mode",
-                                        "Multi-monitor placement profiles",
-                                        "Performance and CPU controls",
-                                        "Audio source picker",
-                                        "Optional startup integration",
-                                    ],
-                                );
-                            });
-                        });
-
-
-                    ui.separator();
-                    ui.label(
-                        RichText::new(
-                            "Cover art colors are marked coming soon until the album-art pipeline is stable.",
-                        )
-                        .size(12.0)
-                        .color(Color32::from_rgb(170, 174, 178)),
+                ui.columns(2, |columns| {
+                    columns[0].label(RichText::new("Built For").strong().size(14.0));
+                    about_list(
+                        &mut columns[0],
+                        &[
+                            "Live system audio",
+                            "Resizable desktop widgets",
+                            "Fast settings and presets",
+                        ],
                     );
-                    ui.add_space(10.0);
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Close").clicked() {
-                            self.show_about = false;
-                        }
-                    });
+
+                    columns[1].label(RichText::new("Next").strong().size(14.0));
+                    about_list(
+                        &mut columns[1],
+                        &[
+                            "Theme/profile import and export",
+                            "Audio source selection",
+                            "More placement profiles",
+                        ],
+                    );
+                });
+
+                if let Some(status) = &self.shortcut_status {
+                    ui.label(
+                        RichText::new(status)
+                            .size(12.0)
+                            .color(Color32::from_rgb(170, 174, 178)),
+                    );
+                }
+
+                ui.separator();
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Close").clicked() {
+                        self.show_about = false;
+                    }
+                    if ui.button("Make desktop shortcut").clicked() {
+                        self.create_desktop_shortcut();
+                    }
                 });
             });
         self.show_about = open && self.show_about;
     }
 
+    fn show_shortcut_prompt(&mut self, ctx: &egui::Context) {
+        if !self.show_shortcut_prompt {
+            return;
+        }
+
+        let mut open = self.show_shortcut_prompt;
+        egui::Window::new("Desktop shortcut")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(430.0)
+            .show(ctx, |ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        RichText::new("Create a desktop shortcut?")
+                            .size(21.0)
+                            .strong()
+                            .color(Color32::from_rgb(238, 240, 243)),
+                    );
+                    ui.label(
+                        RichText::new(
+                            "Chosen Visualizer can add a shortcut to your desktop for this app.",
+                        )
+                        .color(Color32::from_rgb(170, 174, 178)),
+                    );
+                    if let Some(status) = &self.shortcut_status {
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(status)
+                                .size(12.0)
+                                .color(Color32::from_rgb(207, 166, 132)),
+                        );
+                    }
+                    ui.add_space(8.0);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Not now").clicked() {
+                            self.dismiss_shortcut_prompt();
+                        }
+                        if ui.button("Create shortcut").clicked() {
+                            self.create_desktop_shortcut();
+                        }
+                    });
+                });
+            });
+
+        if !open {
+            self.dismiss_shortcut_prompt();
+        }
+    }
     fn settings_window(&mut self, parent_ctx: &egui::Context, audio: &AudioFrame, dt: f32) {
         if !self.settings.show_settings {
             return;
@@ -1226,6 +1351,7 @@ impl eframe::App for ChosenVisualizerApp {
             });
 
         self.show_update_popup(ctx);
+        self.show_shortcut_prompt(ctx);
 
         self.apply_window_changes(ctx);
         self.maybe_save();
@@ -1312,17 +1438,31 @@ fn status_row(ui: &mut egui::Ui, audio: &AudioFrame) {
     }
 }
 
-fn about_key(ui: &mut egui::Ui, label: &str) {
-    ui.label(
-        RichText::new(label)
-            .strong()
-            .color(Color32::from_rgb(202, 207, 213)),
-    );
+fn about_stat(ui: &mut egui::Ui, label: &str, value: &str) {
+    egui::Frame::none()
+        .fill(Color32::from_rgb(20, 22, 25))
+        .stroke(Stroke::new(1.0, Color32::from_rgb(42, 47, 54)))
+        .inner_margin(egui::Margin::symmetric(12.0, 10.0))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(label)
+                    .strong()
+                    .color(Color32::from_rgb(226, 231, 236)),
+            );
+            ui.label(
+                RichText::new(value)
+                    .size(12.0)
+                    .color(Color32::from_rgb(160, 168, 178)),
+            );
+        });
 }
 
 fn about_list(ui: &mut egui::Ui, items: &[&str]) {
     for item in items {
-        ui.label(format!("- {item}"));
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("-").color(Color32::from_rgb(198, 218, 205)));
+            ui.label(RichText::new(*item).color(Color32::from_rgb(190, 196, 204)));
+        });
     }
 }
 

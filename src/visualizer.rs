@@ -50,6 +50,11 @@ impl VisualizerState {
 
         self.color_phase = (self.color_phase + dt * (0.25 + audio.volume * 1.5)) % 1.0;
 
+        let hide_overlays = settings.desktop_widget && settings.visualizer_only_widget;
+        if hide_overlays && audio.volume < 0.01 && self.smooth.iter().all(|value| *value < 0.025) {
+            self.apply_idle_motion();
+        }
+
         let (mut primary, mut secondary) = settings.accent_colors();
         if settings.color_preset == ColorPreset::CoverArt {
             if let Some((p, s)) = self.cover_palette(settings) {
@@ -82,13 +87,26 @@ impl VisualizerState {
             }
         }
 
-        let hide_overlays = settings.desktop_widget && settings.visualizer_only_widget;
         if settings.show_meter && !hide_overlays {
             paint_meters(&painter, rect, audio, primary, secondary);
         }
 
         if !audio.active && !hide_overlays {
             paint_status(&painter, rect, audio);
+        }
+    }
+
+    fn apply_idle_motion(&mut self) {
+        let len = self.smooth.len().max(1);
+        for (i, value) in self.smooth.iter_mut().enumerate() {
+            let t = i as f32 / len as f32;
+            let phase = self.color_phase * TAU + t * TAU * 2.4;
+            let center_bias = 1.0 - ((t - 0.5).abs() * 1.35).min(0.75);
+            let idle = 0.032 + (phase.sin() * 0.5 + 0.5) * 0.095 * center_bias;
+            *value = idle.clamp(0.0, 0.16);
+            if i < self.peaks.len() {
+                self.peaks[i] = self.peaks[i].max(*value * 1.12);
+            }
         }
     }
 

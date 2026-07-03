@@ -166,6 +166,10 @@ pub struct Settings {
     pub target_fps: u32,
     #[serde(default = "default_visualizer_count")]
     pub visualizer_count: usize,
+    #[serde(default)]
+    pub desktop_shortcut_prompted: bool,
+    #[serde(default)]
+    pub desktop_shortcut_created: bool,
 }
 
 impl Default for Settings {
@@ -182,7 +186,7 @@ impl Default for Settings {
             falloff: 0.90,
             line_width: 2.0,
             fill_opacity: 0.82,
-            background_alpha: 0.0,
+            background_alpha: 1.0,
             show_grid: true,
             bar_gap: 3.0,
             bar_rounding: 0.45,
@@ -192,13 +196,13 @@ impl Default for Settings {
             show_top_bar: true,
             show_peaks: false,
             show_meter: true,
-            visualizer_only_widget: true,
+            visualizer_only_widget: false,
             compact_controls: false,
             always_on_top: false,
             click_through: false,
             frameless: false,
-            desktop_widget: true,
-            desktop_only: true,
+            desktop_widget: false,
+            desktop_only: false,
             cover_art_source: String::new(),
             desktop_x: 120,
             desktop_y: 120,
@@ -209,6 +213,8 @@ impl Default for Settings {
             strip_thickness: 96.0,
             target_fps: 60,
             visualizer_count: 1,
+            desktop_shortcut_prompted: false,
+            desktop_shortcut_created: false,
         }
     }
 }
